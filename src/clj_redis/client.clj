@@ -1,6 +1,8 @@
 (ns clj-redis.client
-  (:import java.net.URI)
-  (:import (redis.clients.jedis Jedis JedisPool JedisPoolConfig JedisPubSub))
+  (:import java.net.URI
+           (redis.clients.jedis Jedis JedisPool JedisPoolConfig
+                                JedisPubSub Transaction)
+           (redis.clients.util SafeEncoder))
   (:require [clojure.string :as str])
   (:refer-clojure :exclude [get set keys type]))
 
@@ -288,4 +290,27 @@
                   (onUnsubscribe [ch cnt])
                   (onMessage [ch msg] (handler ch msg)))]
     (lease p (fn [^Jedis j]
-      (.subscribe j pub-sub ^"[Ljava.lang.String;" (into-array chs))))))
+               (.subscribe j pub-sub ^"[Ljava.lang.String;" (into-array chs))))))
+
+; Transactions
+
+(defn multi
+  [p]
+  (lease p (fn [^Jedis j] (.multi j))))
+
+(defn- decode
+  [result]
+  (if (instance? java.util.Collection result)
+    (map decode result)
+    (SafeEncoder/encode ^bytes result)))
+
+(defn exec
+  [^redis.clients.jedis.Transaction t]
+  (decode (.exec t)))
+
+(defmacro with-transaction
+  [p t & body]
+  `(let [~(with-meta t {:tag 'redis.clients.jedis.Transaction}) (multi ~p)]
+     ~@body
+     (exec ~t)))
+
